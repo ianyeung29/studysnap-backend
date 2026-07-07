@@ -13,8 +13,8 @@ export default function Navbar() {
         </Link>
 
         <div className={styles.actions}>
-          <a href="#tool" className={`btn btn-ghost ${styles.ctaBtn}`}>
-            Try it free →
+          <a href="#download" className={`btn btn-ghost ${styles.ctaBtn}`}>
+            Download
           </a>
         </div>
       </div>

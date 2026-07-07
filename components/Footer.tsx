@@ -14,8 +14,8 @@ export default function Footer() {
         </div>
 
         <div className={styles.links}>
-          <a href="#tool">Try it free</a>
-          <a href="#how-it-works">How it works</a>
+          <a href="#features">Features</a>
+          <a href="#download">Download</a>
         </div>
       </div>
 
