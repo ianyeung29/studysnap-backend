@@ -22,6 +22,21 @@ export default function Home() {
       desc: "The magic happens here: we cross-reference spoken lectures with your board photos. If a professor says 'this formula is on the test', we map it instantly.",
     },
     {
+      icon: "🏷️",
+      title: "AI Auto-Subject Tagging",
+      desc: "Zero typing required. Leave the subject label empty, and our AI will automatically identify the academic subject of the lecture and organize your study binder.",
+    },
+    {
+      icon: "🔊",
+      title: "Listen on the Go (TTS)",
+      desc: "Convert any generated study guide into an audio podcast. Listen to your lecture summaries while walking, commuting, or working out.",
+    },
+    {
+      icon: "🃏",
+      title: "Direct Anki/Quizlet Export",
+      desc: "One-click export of flashcards into standard tab-separated decks, ready to import directly into Anki or Quizlet for active recall study.",
+    },
+    {
       icon: "🔒",
       title: "100% Local & Private",
       desc: "All your study guides, flashcards, and recordings are stored directly on your phone. No logins, no database syncs, and no tracking.",
