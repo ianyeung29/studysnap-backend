@@ -1,7 +1,7 @@
 // app/api/transcribe/route.ts — SERVER ONLY
 import { NextRequest, NextResponse } from "next/server";
 import { openai } from "@/lib/openai";
-import { File } from "buffer";
+import { toFile } from "openai";
 
 export const maxDuration = 60; // Allow up to 1 minute for Whisper processing
 
@@ -20,8 +20,8 @@ export async function POST(request: NextRequest) {
     // Convert file to buffer for OpenAI
     const buffer = Buffer.from(await audioFile.arrayBuffer());
     
-    // Convert to a File object compatible with OpenAI node SDK
-    const file = new File([buffer], "recording.m4a", { type: "audio/m4a" });
+    // Use OpenAI's official helper to convert the buffer to a file compatible with their SDK
+    const file = await toFile(buffer, "recording.m4a", { type: "audio/m4a" });
 
     console.log(`[Whisper API] Starting transcription for file of size: ${buffer.length} bytes`);
     
