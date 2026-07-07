@@ -16,7 +16,7 @@ export { TEMPLATES };
 export async function generateStudyMaterial(
   notes: string,
   templateId: TemplateId
-): Promise<{ title: string; content: string }> {
+): Promise<{ title: string; content: string; course: string }> {
   const template = TEMPLATES[templateId];
 
   const completion = await openai.chat.completions.create({
@@ -24,7 +24,9 @@ export async function generateStudyMaterial(
     messages: [
       {
         role: "system",
-        content: template.systemPrompt,
+        content:
+          template.systemPrompt +
+          "\n\nAdditionally, analyze the lecture notes and classify the academic subject or course (e.g. Chemistry, Biology, History, Computer Science, Calculus, Economics). Return this subject tag as a short, clean, capitalized phrase (1-3 words max, e.g. \"Chemistry\" or \"Computer Science\") in a third JSON key \"course\".",
       },
       {
         role: "user",
@@ -42,5 +44,6 @@ export async function generateStudyMaterial(
   return {
     title: parsed.title || "Untitled",
     content: parsed.content || "",
+    course: parsed.course || "General",
   };
 }
