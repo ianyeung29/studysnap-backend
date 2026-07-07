@@ -13,8 +13,8 @@ export default function Home() {
     },
     {
       icon: "📷",
-      title: "Whiteboard Snapping",
-      desc: "Never struggle to write down complex formulas or slides. Snap photos of the board, and our AI extracts the exact text and mathematical formulas.",
+      title: "Whiteboard Snapping & Crop",
+      desc: "Snap slides or whiteboards. Use our built-in cropping tool to target specific diagrams or formulas. Our AI extracts mathematical layout instantly.",
     },
     {
       icon: "🧠",
@@ -25,6 +25,16 @@ export default function Home() {
       icon: "🏷️",
       title: "AI Auto-Subject Tagging",
       desc: "Zero typing required. Leave the subject label empty, and our AI will automatically identify the academic subject of the lecture and organize your study binder.",
+    },
+    {
+      icon: "💡",
+      title: "Interactive ELI5 Analogies",
+      desc: "Confused by a complex term? Enter the word into our simplifier, and our AI generates a simple, creative analogy based on your lecture context.",
+    },
+    {
+      icon: "⏰",
+      title: "Spaced Repetition Alerts",
+      desc: "Scientifically optimize your memory retention. Instantly schedule study notifications at 1-day, 3-day, and 7-day intervals to lock in facts.",
     },
     {
       icon: "🔊",
