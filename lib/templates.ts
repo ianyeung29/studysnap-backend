@@ -31,6 +31,10 @@ Return ONLY valid JSON in this exact format:
     - Detail 2
     ### Summary
     Brief paragraph summarizing the main points.
+
+    ### ⚠️ Knowledge Gaps & Clarifications
+    - **Potential Gap / Unclear Area**: Description of what concept might need deeper reading.
+    - **Questions for your TA / Professor**: 1-2 specific questions to ask in office hours.
     
     Repeat sections for each major topic covered."
 }
@@ -111,7 +115,14 @@ D) Option D
 
 ## Topics Most Likely to Be Tested
 - Topic 1 — why it matters
-- Topic 2 — why it matters"
+- Topic 2 — why it matters
+
+## 🙋 Office Hours / TA Prep
+### Potential Knowledge Gaps
+- Concept that was briefly mentioned but is critical for testing.
+### Questions for your TA/Professor
+- Q1: Question about concept X.
+- Q2: Question about concept Y."
 }`,
   },
 
