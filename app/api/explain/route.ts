@@ -1,6 +1,6 @@
 // app/api/explain/route.ts — SERVER ONLY
 import { NextRequest, NextResponse } from "next/server";
-import { openai } from "@/lib/openai";
+import { generateTextWithFallback } from "@/lib/openai";
 
 export const maxDuration = 30;
 
@@ -61,23 +61,12 @@ Return your explanation in a JSON object with this exact format:
   "explanation": "A response (1-2 paragraphs) in Markdown format. Use bold text for key terms. Keep the tone friendly, supportive, and engaging."
 }`;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-5.4-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert tutor that explains complex ideas simply and creatively in JSON format.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      temperature: 0.6,
-      response_format: { type: "json_object" },
-    });
-
-    const raw = completion.choices[0]?.message?.content;
+    const raw = await generateTextWithFallback(
+      "You are an expert tutor that explains complex ideas simply and creatively in JSON format.",
+      prompt,
+      0.6,
+      true
+    );
     if (!raw) throw new Error("No response from AI");
 
     const parsed = JSON.parse(raw);
