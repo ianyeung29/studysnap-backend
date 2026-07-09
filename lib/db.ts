@@ -1,9 +1,20 @@
 import fs from "fs";
 import path from "path";
+import { neon } from "@neondatabase/serverless";
 
 const SCRATCH_DIR = path.join(process.cwd(), "scratch");
 const EVENTS_FILE = path.join(SCRATCH_DIR, "product_events.jsonl");
 const LOGS_FILE = path.join(SCRATCH_DIR, "ai_usage_logs.jsonl");
+
+// Connect to Neon PostgreSQL if DATABASE_URL env variable exists
+const databaseUrl = process.env.DATABASE_URL;
+const sql = databaseUrl ? neon(databaseUrl) : null;
+
+if (sql) {
+  console.log("🔋 Connected to Neon PostgreSQL database telemetry layer.");
+} else {
+  console.log("📂 DATABASE_URL not set. Running database telemetry layer on local JSONL fallback.");
+}
 
 // Ensure directories exist
 function ensureScratchDir() {
@@ -37,32 +48,65 @@ export interface AiUsageLog {
   createdAt: string;
 }
 
-export async function saveProductEvent(event: Omit<ProductEvent, "createdAt">): Promise<void> {
+// Helper to append JSONL to local disk
+function writeToJsonlFile(filePath: string, record: any) {
   ensureScratchDir();
+  const line = JSON.stringify(record) + "\n";
+  fs.appendFileSync(filePath, line, "utf8");
+}
+
+export async function saveProductEvent(event: Omit<ProductEvent, "createdAt">): Promise<void> {
   const fullEvent: ProductEvent = {
     ...event,
     createdAt: new Date().toISOString(),
   };
 
-  const line = JSON.stringify(fullEvent) + "\n";
-  fs.appendFileSync(EVENTS_FILE, line, "utf8");
-
-  // Telemetry to stdout
+  // Log stdout
   console.log(`[PRODUCT_ANALYTICS] ${JSON.stringify(fullEvent)}`);
+
+  // Write to Neon PostgreSQL if active, fallback to JSONL
+  if (sql) {
+    try {
+      await sql`
+        INSERT INTO product_events (user_id, event_name, metadata_json, platform, app_version)
+        VALUES (${fullEvent.userId}, ${fullEvent.eventName}, ${JSON.stringify(fullEvent.metadata || {})}, ${fullEvent.platform || null}, ${fullEvent.appVersion || null})
+      `;
+      return;
+    } catch (dbErr) {
+      console.error("Neon PostgreSQL write failed for product event, falling back to JSONL:", dbErr);
+    }
+  }
+
+  writeToJsonlFile(EVENTS_FILE, fullEvent);
 }
 
 export async function saveAiUsageLog(log: Omit<AiUsageLog, "createdAt">): Promise<void> {
-  ensureScratchDir();
   const fullLog: AiUsageLog = {
     ...log,
     createdAt: new Date().toISOString(),
   };
 
-  const line = JSON.stringify(fullLog) + "\n";
-  fs.appendFileSync(LOGS_FILE, line, "utf8");
-
-  // Telemetry to stdout
+  // Log stdout
   console.log(`[AI_USAGE_LOG] ${JSON.stringify(fullLog)}`);
+
+  // Write to Neon PostgreSQL if active, fallback to JSONL
+  if (sql) {
+    try {
+      await sql`
+        INSERT INTO ai_usage_logs (user_id, session_id, feature, provider, model, input_tokens, cached_input_tokens, output_tokens, estimated_cost_usd, latency_ms, success, error_code)
+        VALUES (
+          ${fullLog.userId}, ${fullLog.sessionId || null}, ${fullLog.feature}, ${fullLog.provider}, ${fullLog.model},
+          ${fullLog.inputTokens}, ${fullLog.cachedInputTokens || 0}, ${fullLog.outputTokens},
+          ${fullLog.estimatedCostUsd}, ${fullLog.latencyMs}, ${fullLog.success}, ${fullLog.errorCode || null}
+        )
+      `;
+      return;
+    } catch (dbErr) {
+      console.error("Neon PostgreSQL write failed for AI usage log, falling back to JSONL:", dbErr);
+    }
+  }
+
+  writeToJsonlFile(LOGS_FILE, fullLog);
 }
 
 // ── Concurrency Lock Manager ──
@@ -99,7 +143,96 @@ export async function checkDailyLimit(
     };
   }
 
-  // If the file doesn't exist yet, there are no logs, so limit check passes
+  // Retrieve limits with defaults
+  const generationLimit = isPremium
+    ? parseInt(process.env.MAX_DAILY_GENERATIONS_PREMIUM || "100", 10)
+    : parseInt(process.env.MAX_DAILY_GENERATIONS_FREE || "25", 10);
+
+  const dailyCostLimitUsd = isPremium
+    ? parseFloat(process.env.MAX_DAILY_COST_PREMIUM || "0.75")
+    : parseFloat(process.env.MAX_DAILY_COST_FREE || "0.25");
+
+  const monthlyCostLimitUsd = isPremium
+    ? parseFloat(process.env.MAX_MONTHLY_COST_PREMIUM || "4.00")
+    : parseFloat(process.env.MAX_MONTHLY_COST_FREE || "0.50");
+
+  // Route querying dynamically (Neon PG -> Fallback to JSONL)
+  if (sql) {
+    try {
+      const [dailyResult, monthlyResult] = await Promise.all([
+        sql`
+          SELECT COUNT(*)::integer as count, SUM(estimated_cost_usd)::numeric as cost
+          FROM ai_usage_logs
+          WHERE user_id = ${userId}
+            AND success = true
+            AND created_at::date = CURRENT_DATE
+        `,
+        sql`
+          SELECT SUM(estimated_cost_usd)::numeric as cost
+          FROM ai_usage_logs
+          WHERE user_id = ${userId}
+            AND success = true
+            AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
+        `
+      ]);
+
+      const dailyCount = dailyResult[0]?.count || 0;
+      const dailyCost = parseFloat(dailyResult[0]?.cost || "0");
+      const monthlyCost = parseFloat(monthlyResult[0]?.cost || "0");
+
+      return evaluateLimits(dailyCount, dailyCost, monthlyCost, generationLimit, dailyCostLimitUsd, monthlyCostLimitUsd);
+    } catch (dbErr) {
+      console.error("Neon PostgreSQL limits check failed, falling back to JSONL check:", dbErr);
+    }
+  }
+
+  // JSONL fallback limits check
+  return checkLimitFromJsonl(userId, generationLimit, dailyCostLimitUsd, monthlyCostLimitUsd);
+}
+
+// Check limits against computed aggregates
+function evaluateLimits(
+  dailyCount: number,
+  dailyCost: number,
+  monthlyCost: number,
+  generationLimit: number,
+  dailyCostLimitUsd: number,
+  monthlyCostLimitUsd: number
+): { allowed: boolean; reason?: string } {
+  // 1. Monthly Cap Check
+  if (monthlyCost >= monthlyCostLimitUsd) {
+    return {
+      allowed: false,
+      reason: "Daily limit reached. You have exceeded your monthly study allowance for the beta. Limits reset next month!",
+    };
+  }
+
+  // 2. Daily Count Check
+  if (dailyCount >= generationLimit) {
+    return {
+      allowed: false,
+      reason: `Daily limit reached. You have used your daily allowance of ${generationLimit} study packs. Limits reset tomorrow!`,
+    };
+  }
+
+  // 3. Daily Cost Check
+  if (dailyCost >= dailyCostLimitUsd) {
+    return {
+      allowed: false,
+      reason: "Daily limit reached. You have exceeded your daily study allowance for the beta. Limits reset tomorrow!",
+    };
+  }
+
+  return { allowed: true };
+}
+
+// Local JSONL limits calculation fallback
+function checkLimitFromJsonl(
+  userId: string,
+  generationLimit: number,
+  dailyCostLimitUsd: number,
+  monthlyCostLimitUsd: number
+): { allowed: boolean; reason?: string } {
   if (!fs.existsSync(LOGS_FILE)) {
     return { allowed: true };
   }
@@ -108,31 +241,30 @@ export async function checkDailyLimit(
     const data = fs.readFileSync(LOGS_FILE, "utf8");
     const lines = data.split("\n").filter(Boolean);
 
-    const now = new Date();
-    const todayDateStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
+    const todayDateStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
     const currentMonthStr = todayDateStr.substring(0, 7); // YYYY-MM
 
-    let dailyGenerationsCount = 0;
-    let dailyCostUsd = 0;
-    let monthlyCostUsd = 0;
+    let dailyCount = 0;
+    let dailyCost = 0;
+    let monthlyCost = 0;
 
     for (const line of lines) {
       try {
         const record: AiUsageLog = JSON.parse(line);
         if (record.userId === userId && record.success) {
           const recordDateStr = record.createdAt.split("T")[0];
-          
-          // Daily Accumulator
+
+          // Daily stats
           if (recordDateStr === todayDateStr) {
             if (["summary", "quiz", "cards", "eli5", "analogy", "explain", "study-guide", "flashcards", "exam-prep", "transcribe", "ocr"].includes(record.feature)) {
-              dailyGenerationsCount++;
+              dailyCount++;
             }
-            dailyCostUsd += record.estimatedCostUsd;
+            dailyCost += record.estimatedCostUsd;
           }
 
-          // Monthly Accumulator
+          // Monthly stats
           if (recordDateStr.startsWith(currentMonthStr)) {
-            monthlyCostUsd += record.estimatedCostUsd;
+            monthlyCost += record.estimatedCostUsd;
           }
         }
       } catch (e) {
@@ -140,47 +272,9 @@ export async function checkDailyLimit(
       }
     }
 
-    // Set tier rules based on environment limits with defaults
-    const generationLimit = isPremium
-      ? parseInt(process.env.MAX_DAILY_GENERATIONS_PREMIUM || "100", 10)
-      : parseInt(process.env.MAX_DAILY_GENERATIONS_FREE || "25", 10);
-
-    const dailyCostLimitUsd = isPremium
-      ? parseFloat(process.env.MAX_DAILY_COST_PREMIUM || "0.75")
-      : parseFloat(process.env.MAX_DAILY_COST_FREE || "0.25");
-
-    const monthlyCostLimitUsd = isPremium
-      ? parseFloat(process.env.MAX_MONTHLY_COST_PREMIUM || "4.00")
-      : parseFloat(process.env.MAX_MONTHLY_COST_FREE || "0.50");
-
-    // 2. Monthly Cap check
-    if (monthlyCostUsd >= monthlyCostLimitUsd) {
-      return {
-        allowed: false,
-        reason: "Daily limit reached. You have exceeded your monthly study allowance for the beta. Limits reset next month!",
-      };
-    }
-
-    // 3. Daily Count check
-    if (dailyGenerationsCount >= generationLimit) {
-      return {
-        allowed: false,
-        reason: `Daily limit reached. You have used your daily allowance of ${generationLimit} study packs. Limits reset tomorrow!`,
-      };
-    }
-
-    // 4. Daily Cost check
-    if (dailyCostUsd >= dailyCostLimitUsd) {
-      return {
-        allowed: false,
-        reason: "Daily limit reached. You have exceeded your daily study allowance for the beta. Limits reset tomorrow!",
-      };
-    }
-
-    return { allowed: true };
+    return evaluateLimits(dailyCount, dailyCost, monthlyCost, generationLimit, dailyCostLimitUsd, monthlyCostLimitUsd);
   } catch (err) {
-    console.error("Failed to read usage logs for limit checking", err);
-    // Allow by default if file system read fails to avoid blocking legitimate users
-    return { allowed: true };
+    console.error("Local JSONL limits calculation crashed:", err);
+    return { allowed: true }; // Allow fallback if disk read crashes
   }
 }
