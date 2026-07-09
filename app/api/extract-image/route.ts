@@ -29,8 +29,45 @@ export async function POST(request: NextRequest) {
     const base64 = Buffer.from(bytes).toString("base64");
     const mimeType = imageFile.type;
 
+    // 1. Classify the image using a cheap low-detail gpt-4o-mini call
+    let activeModel = "gpt-4o-mini";
+    try {
+      const classificationResponse = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Analyze this image. Does it contain handwriting, science/math equations, or complex whiteboards? Respond with exactly one word: 'yes' or 'no'.",
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mimeType};base64,${base64}`,
+                  detail: "low",
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: 10,
+        temperature: 0.0,
+      });
+
+      const classification = classificationResponse.choices[0]?.message?.content?.trim().toLowerCase() ?? "no";
+      if (classification.includes("yes")) {
+        activeModel = "gpt-5.4-mini";
+      }
+      console.log(`[OCR Routing] Image classification: ${classification} -> Routing to: ${activeModel}`);
+    } catch (routeErr) {
+      console.warn("[OCR Routing] Classification failed, defaulting to gpt-4o-mini:", routeErr);
+    }
+
+    // 2. Perform high-fidelity extraction using the routed model
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: activeModel,
       messages: [
         {
           role: "user",

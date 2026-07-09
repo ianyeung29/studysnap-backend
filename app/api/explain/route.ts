@@ -62,7 +62,7 @@ Return your explanation in a JSON object with this exact format:
 }`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-5.4-mini",
       messages: [
         {
           role: "system",
