@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateStudyMaterial, TemplateId } from "@/lib/openai";
-import { checkDailyLimit, saveAiUsageLog, saveProductEvent } from "@/lib/db";
+import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock } from "@/lib/db";
 import { calculateCost } from "@/lib/pricing";
 
 export async function POST(request: NextRequest) {
@@ -8,6 +8,7 @@ export async function POST(request: NextRequest) {
   let userId = "anonymous_beta_tester";
   let templateId: TemplateId = "study-guide";
   let isMaster = false;
+  let lockAcquired = false;
 
   try {
     const body = await request.json();
@@ -64,6 +65,15 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json(
         { error: limitCheck.reason },
+        { status: 429 }
+      );
+    }
+
+    // 2. Acquire Concurrency Lock
+    lockAcquired = acquireLock(userId, "summarize");
+    if (!lockAcquired) {
+      return NextResponse.json(
+        { error: "Another study pack compilation is currently in progress. Please wait." },
         { status: 429 }
       );
     }
@@ -128,5 +138,9 @@ export async function POST(request: NextRequest) {
       { error: message || "Failed to generate study materials. Please try again." },
       { status: 500 }
     );
+  } finally {
+    if (lockAcquired) {
+      releaseLock(userId, "summarize");
+    }
   }
 }

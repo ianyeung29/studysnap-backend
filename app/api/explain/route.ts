@@ -1,7 +1,7 @@
 // app/api/explain/route.ts — SERVER ONLY
 import { NextRequest, NextResponse } from "next/server";
 import { generateTextWithFallback } from "@/lib/openai";
-import { checkDailyLimit, saveAiUsageLog, saveProductEvent } from "@/lib/db";
+import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock } from "@/lib/db";
 import { calculateCost } from "@/lib/pricing";
 
 export const maxDuration = 30;
@@ -11,6 +11,7 @@ export async function POST(request: NextRequest) {
   let userId = "anonymous_beta_tester";
   let mode = "eli5";
   let concept = "";
+  let lockAcquired = false;
 
   try {
     const body = await request.json();
@@ -37,6 +38,15 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json(
         { error: limitCheck.reason },
+        { status: 429 }
+      );
+    }
+
+    // 2. Acquire Concurrency Lock
+    lockAcquired = acquireLock(userId, "explain");
+    if (!lockAcquired) {
+      return NextResponse.json(
+        { error: "Another tutor explanation is currently in progress. Please wait." },
         { status: 429 }
       );
     }
@@ -149,5 +159,9 @@ export async function POST(request: NextRequest) {
       { error: message },
       { status: 500 }
     );
+  } finally {
+    if (lockAcquired) {
+      releaseLock(userId, "explain");
+    }
   }
 }
