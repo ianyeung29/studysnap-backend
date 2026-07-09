@@ -1,23 +1,39 @@
 // app/api/explain/route.ts — SERVER ONLY
 import { NextRequest, NextResponse } from "next/server";
 import { generateTextWithFallback } from "@/lib/openai";
-import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock } from "@/lib/db";
+import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock, upsertUser } from "@/lib/db";
 import { calculateCost } from "@/lib/pricing";
+import { verifyUserToken } from "@/lib/auth";
 
 export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  let userId = "anonymous_beta_tester";
+  let userId = "unauthenticated_user";
+  let installId = "anonymous_beta_tester";
   let mode = "eli5";
   let concept = "";
   let lockAcquired = false;
 
   try {
-    const body = await request.json();
-    const { concept: reqConcept, context, mode: reqMode = "eli5", userAnswer = "", userId: reqUserId, isPremium = false } = body;
+    // 1. Authenticate Request
+    const authHeader = request.headers.get("Authorization");
+    const verifiedUser = await verifyUserToken(authHeader);
+    if (!verifiedUser) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
 
-    if (reqUserId) userId = reqUserId;
+    userId = verifiedUser.userId;
+    const userEmail = verifiedUser.email;
+    const authProvider = verifiedUser.provider;
+
+    // Sync profile to database
+    await upsertUser(userId, userEmail, authProvider);
+
+    const body = await request.json();
+    const { concept: reqConcept, context, mode: reqMode = "eli5", userAnswer = "", userId: reqInstallId, isPremium = false } = body;
+
+    if (reqInstallId) installId = reqInstallId;
     if (reqConcept) concept = reqConcept;
     mode = reqMode;
 
@@ -34,7 +50,7 @@ export async function POST(request: NextRequest) {
       await saveProductEvent({
         userId,
         eventName: "limit_blocked",
-        metadata: { isPremium, feature: mode === "check-quiz" ? "quiz" : "eli5", reason: limitCheck.reason },
+        metadata: { isPremium, feature: mode === "check-quiz" ? "quiz" : "eli5", reason: limitCheck.reason, installId },
       });
       return NextResponse.json(
         { error: limitCheck.reason },
@@ -120,7 +136,7 @@ export async function POST(request: NextRequest) {
     // 4. Save Usage Log Telemetry
     await saveAiUsageLog({
       userId,
-      sessionId: concept, // Use concept name as sessionId context
+      sessionId: installId,
       feature: mode === "check-quiz" ? "quiz" : "eli5",
       provider,
       model,
@@ -144,6 +160,7 @@ export async function POST(request: NextRequest) {
     // Save Failed Usage Log
     await saveAiUsageLog({
       userId,
+      sessionId: installId,
       feature: mode === "check-quiz" ? "quiz" : "eli5",
       provider: "OpenAI",
       model: "gpt-4o-mini",

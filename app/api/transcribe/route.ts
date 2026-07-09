@@ -1,24 +1,39 @@
-// app/api/transcribe/route.ts — SERVER ONLY
 import { NextRequest, NextResponse } from "next/server";
 import { openai } from "@/lib/openai";
 import { toFile } from "openai";
-import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock } from "@/lib/db";
+import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock, upsertUser } from "@/lib/db";
+import { verifyUserToken } from "@/lib/auth";
 
 export const maxDuration = 60; // Allow up to 1 minute for Whisper processing
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  let userId = "anonymous_beta_tester";
+  let userId = "unauthenticated_user";
+  let installId = "anonymous_beta_tester";
   let isPremium = false;
   let durationSeconds = 0;
   let lockAcquired = false;
 
   try {
+    // 1. Authenticate Request
+    const authHeader = request.headers.get("Authorization");
+    const verifiedUser = await verifyUserToken(authHeader);
+    if (!verifiedUser) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
+
+    userId = verifiedUser.userId;
+    const userEmail = verifiedUser.email;
+    const authProvider = verifiedUser.provider;
+
+    // Sync profile to database
+    await upsertUser(userId, userEmail, authProvider);
+
     const formData = await request.formData();
     const audioFile = formData.get("audio") as any; // Cast as any to read file data in NextJS context
 
-    const reqUserId = formData.get("userId") as string;
-    if (reqUserId) userId = reqUserId;
+    const reqInstallId = formData.get("userId") as string; // client passed anonymous install ID
+    if (reqInstallId) installId = reqInstallId;
     isPremium = formData.get("isPremium") === "true";
     durationSeconds = parseInt((formData.get("durationSeconds") as string) || "0", 10);
 
@@ -35,7 +50,7 @@ export async function POST(request: NextRequest) {
       await saveProductEvent({
         userId,
         eventName: "limit_blocked",
-        metadata: { isPremium, feature: "transcribe", reason: limitCheck.reason },
+        metadata: { isPremium, feature: "transcribe", reason: limitCheck.reason, installId },
       });
       return NextResponse.json(
         { error: limitCheck.reason },
@@ -86,6 +101,7 @@ export async function POST(request: NextRequest) {
     // Save Transcription usage log
     await saveAiUsageLog({
       userId,
+      sessionId: installId,
       feature: "transcribe",
       provider: "OpenAI",
       model: "whisper-1",
@@ -108,6 +124,7 @@ export async function POST(request: NextRequest) {
     // Save Failed log
     await saveAiUsageLog({
       userId,
+      sessionId: installId,
       feature: "transcribe",
       provider: "OpenAI",
       model: "whisper-1",

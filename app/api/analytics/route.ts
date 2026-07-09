@@ -1,8 +1,22 @@
 import { NextResponse } from "next/server";
 import { saveProductEvent } from "@/lib/db";
+import { verifyUserToken } from "@/lib/auth";
 
 export async function POST(req: Request) {
   try {
+    const authHeader = req.headers.get("Authorization");
+    let verifiedUser = null;
+
+    if (authHeader) {
+      verifiedUser = await verifyUserToken(authHeader);
+      if (!verifiedUser) {
+        return NextResponse.json(
+          { success: false, error: "Unauthorized. Invalid token." },
+          { status: 401 }
+        );
+      }
+    }
+
     const rawText = await req.text();
     
     // Prevent massive payloads (max 10KB to protect database storage)
@@ -31,9 +45,19 @@ export async function POST(req: Request) {
       );
     }
 
-    // List of accepted analytics event names
-    const ALLOWED_EVENTS = [
+    // Pre-login allowed events (anonymous)
+    const PRE_LOGIN_EVENTS = [
       "onboarding_completed",
+      "paywall_viewed",
+      "trial_started",
+      "delete_local_data_clicked",
+      "settings_viewed",
+      "limit_blocked",
+    ];
+
+    // All allowed events
+    const ALLOWED_EVENTS = [
+      ...PRE_LOGIN_EVENTS,
       "start_session_clicked",
       "recording_started",
       "recording_stopped",
@@ -43,14 +67,9 @@ export async function POST(req: Request) {
       "flashcards_generated",
       "quiz_generated",
       "practice_started",
-      "paywall_viewed",
-      "trial_started",
       "generation_failed",
-      "delete_local_data_clicked",
       "artifact_cache_hit",
       "feedback_submitted",
-      "settings_viewed",
-      "limit_blocked",
     ];
 
     if (!ALLOWED_EVENTS.includes(eventName)) {
@@ -60,10 +79,24 @@ export async function POST(req: Request) {
       );
     }
 
+    // If no verified user token, verify event is pre-login allowed
+    if (!verifiedUser && !PRE_LOGIN_EVENTS.includes(eventName)) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized. This event requires authentication." },
+        { status: 401 }
+      );
+    }
+
+    const finalUserId = verifiedUser ? verifiedUser.userId : userId;
+    const finalMetadata = {
+      ...(metadata || {}),
+      ...(verifiedUser ? { installId: userId } : {}), // correlate install ID post-login
+    };
+
     await saveProductEvent({
-      userId,
+      userId: finalUserId,
       eventName,
-      metadata: metadata || {},
+      metadata: finalMetadata,
       platform: platform ? String(platform).substring(0, 50) : undefined,
       appVersion: appVersion ? String(appVersion).substring(0, 50) : undefined,
     });

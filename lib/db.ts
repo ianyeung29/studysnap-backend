@@ -146,6 +146,40 @@ export function releaseLock(userId: string, action: string): void {
   activeLocks.delete(lockKey);
 }
 
+// ── User Profiling ──
+export async function upsertUser(userId: string, email?: string, provider?: string): Promise<void> {
+  if (sql) {
+    try {
+      await sql`
+        INSERT INTO users (id, email, auth_provider, last_seen_at)
+        VALUES (${userId}, ${email || null}, ${provider || null}, NOW())
+        ON CONFLICT (id) DO UPDATE
+        SET email = COALESCE(users.email, EXCLUDED.email),
+            auth_provider = COALESCE(users.auth_provider, EXCLUDED.auth_provider),
+            last_seen_at = NOW()
+      `;
+    } catch (dbErr) {
+      console.error(`Failed to upsert user profile ${userId}:`, dbErr);
+    }
+  }
+}
+
+export async function anonymizeUser(userId: string): Promise<void> {
+  if (sql) {
+    try {
+      await sql`
+        UPDATE users
+        SET email = 'deleted_user_' || SUBSTRING(id, 1, 8) || '@studysnap.app',
+            auth_provider = 'deleted',
+            last_seen_at = NOW()
+        WHERE id = ${userId}
+      `;
+    } catch (dbErr) {
+      console.error(`Failed to anonymize user profile ${userId}:`, dbErr);
+    }
+  }
+}
+
 // ── Limit Enforcements ──
 export async function checkDailyLimit(
   userId: string,
@@ -162,16 +196,29 @@ export async function checkDailyLimit(
     };
   }
 
-  // Retrieve limits with defaults
-  const generationLimit = isPremium
+  // 2. Query user tier from Neon PostgreSQL to prevent client spoofing
+  let finalIsPremium = isPremium;
+  if (sql) {
+    try {
+      const userResult = await sql`SELECT tier FROM users WHERE id = ${userId}`;
+      if (userResult && userResult.length > 0) {
+        finalIsPremium = userResult[0].tier === "premium";
+      }
+    } catch (dbErr) {
+      console.warn(`Could not resolve DB tier for user ${userId}, falling back to client assertion:`, dbErr);
+    }
+  }
+
+  // Retrieve limits with defaults using verified tier status
+  const generationLimit = finalIsPremium
     ? parseInt(process.env.MAX_DAILY_GENERATIONS_PREMIUM || "100", 10)
     : parseInt(process.env.MAX_DAILY_GENERATIONS_FREE || "25", 10);
 
-  const dailyCostLimitUsd = isPremium
+  const dailyCostLimitUsd = finalIsPremium
     ? parseFloat(process.env.MAX_DAILY_COST_PREMIUM || "0.75")
     : parseFloat(process.env.MAX_DAILY_COST_FREE || "0.25");
 
-  const monthlyCostLimitUsd = isPremium
+  const monthlyCostLimitUsd = finalIsPremium
     ? parseFloat(process.env.MAX_MONTHLY_COST_PREMIUM || "4.00")
     : parseFloat(process.env.MAX_MONTHLY_COST_FREE || "0.50");
 

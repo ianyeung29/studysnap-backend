@@ -1,5 +1,15 @@
 -- schema.sql — Neon PostgreSQL Table Creations and Indexes
 
+-- 0. Users Table
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT,
+  auth_provider TEXT,
+  tier TEXT DEFAULT 'free',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 1. Product Events Table
 CREATE TABLE IF NOT EXISTS product_events (
   id SERIAL PRIMARY KEY,

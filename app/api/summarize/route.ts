@@ -1,20 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateStudyMaterial, TemplateId } from "@/lib/openai";
-import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock } from "@/lib/db";
+import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock, upsertUser } from "@/lib/db";
 import { calculateCost } from "@/lib/pricing";
+import { verifyUserToken } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  let userId = "anonymous_beta_tester";
+  let userId = "unauthenticated_user";
+  let installId = "anonymous_beta_tester";
   let templateId: TemplateId = "study-guide";
   let isMaster = false;
   let lockAcquired = false;
 
   try {
+    // 1. Authenticate Request
+    const authHeader = request.headers.get("Authorization");
+    const verifiedUser = await verifyUserToken(authHeader);
+    if (!verifiedUser) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
+
+    userId = verifiedUser.userId;
+    const userEmail = verifiedUser.email;
+    const authProvider = verifiedUser.provider;
+
+    // Sync profile to database
+    await upsertUser(userId, userEmail, authProvider);
+
     const body = await request.json();
-    const { notes, templateId: reqTemplateId, isMaster: reqIsMaster = false, userId: reqUserId, isPremium = false } = body;
+    const { userId: reqInstallId, notes, templateId: reqTemplateId, isMaster: reqIsMaster = false, isPremium = false } = body;
     
-    if (reqUserId) userId = reqUserId;
+    if (reqInstallId) installId = reqInstallId;
     if (reqTemplateId) templateId = reqTemplateId as TemplateId;
     isMaster = reqIsMaster;
 
@@ -61,7 +77,7 @@ export async function POST(request: NextRequest) {
       await saveProductEvent({
         userId,
         eventName: "limit_blocked",
-        metadata: { isPremium, feature: templateId, reason: limitCheck.reason },
+        metadata: { isPremium, feature: templateId, reason: limitCheck.reason, installId },
       });
       return NextResponse.json(
         { error: limitCheck.reason },
@@ -93,7 +109,7 @@ export async function POST(request: NextRequest) {
     // 4. Save Usage Log Telemetry
     await saveAiUsageLog({
       userId,
-      sessionId: result.title, // Maps session identifier to title context
+      sessionId: installId,
       feature: templateId,
       provider: usage.provider,
       model: usage.model,
@@ -116,6 +132,7 @@ export async function POST(request: NextRequest) {
     // Save Failed Usage Log
     await saveAiUsageLog({
       userId,
+      sessionId: installId,
       feature: templateId,
       provider: isMaster ? "DeepSeek" : "OpenAI",
       model: isMaster ? "deepseek-reasoner" : "gpt-4o-mini",

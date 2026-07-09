@@ -1,26 +1,41 @@
 // app/api/extract-image/route.ts — SERVER ONLY
 import { NextRequest, NextResponse } from "next/server";
 import { openai } from "@/lib/openai";
-
-import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock } from "@/lib/db";
+import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock, upsertUser } from "@/lib/db";
 import { calculateCost } from "@/lib/pricing";
+import { verifyUserToken } from "@/lib/auth";
 
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  let userId = "anonymous_beta_tester";
+  let userId = "unauthenticated_user";
+  let installId = "anonymous_beta_tester";
   let isPremium = false;
   let photoCount = 1;
   let lockAcquired = false;
   let activeModel = "gpt-4o-mini";
 
   try {
+    // 1. Authenticate Request
+    const authHeader = request.headers.get("Authorization");
+    const verifiedUser = await verifyUserToken(authHeader);
+    if (!verifiedUser) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
+
+    userId = verifiedUser.userId;
+    const userEmail = verifiedUser.email;
+    const authProvider = verifiedUser.provider;
+
+    // Sync profile to database
+    await upsertUser(userId, userEmail, authProvider);
+
     const formData = await request.formData();
     const imageFile = formData.get("image") as File | null;
 
-    const reqUserId = formData.get("userId") as string;
-    if (reqUserId) userId = reqUserId;
+    const reqInstallId = formData.get("userId") as string;
+    if (reqInstallId) installId = reqInstallId;
     isPremium = formData.get("isPremium") === "true";
     photoCount = parseInt((formData.get("photoCount") as string) || "1", 10);
 
@@ -45,7 +60,7 @@ export async function POST(request: NextRequest) {
       await saveProductEvent({
         userId,
         eventName: "limit_blocked",
-        metadata: { isPremium, feature: "ocr", reason: limitCheck.reason },
+        metadata: { isPremium, feature: "ocr", reason: limitCheck.reason, installId },
       });
       return NextResponse.json(
         { error: limitCheck.reason },
@@ -157,6 +172,7 @@ export async function POST(request: NextRequest) {
     // Save OCR success usage log
     await saveAiUsageLog({
       userId,
+      sessionId: installId,
       feature: "ocr",
       provider: "OpenAI",
       model: activeModel,
@@ -176,6 +192,7 @@ export async function POST(request: NextRequest) {
     // Save OCR failed log
     await saveAiUsageLog({
       userId,
+      sessionId: installId,
       feature: "ocr",
       provider: "OpenAI",
       model: activeModel,
