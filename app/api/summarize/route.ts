@@ -4,7 +4,7 @@ import { generateStudyMaterial, TemplateId } from "@/lib/openai";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { notes, templateId } = body as { notes: string; templateId: TemplateId };
+    const { notes, templateId, isMaster = false } = body as { notes: string; templateId: TemplateId; isMaster?: boolean };
 
     if (!notes || typeof notes !== "string") {
       return NextResponse.json(
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await generateStudyMaterial(notes, templateId);
+    const result = await generateStudyMaterial(notes, templateId, isMaster);
 
     return NextResponse.json({ success: true, ...result });
   } catch (error: unknown) {

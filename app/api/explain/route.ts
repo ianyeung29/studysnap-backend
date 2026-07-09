@@ -64,6 +64,7 @@ Return your explanation in a JSON object with this exact format:
     const raw = await generateTextWithFallback(
       "You are an expert tutor that explains complex ideas simply and creatively in JSON format.",
       prompt,
+      "flash",
       0.6,
       true
     );

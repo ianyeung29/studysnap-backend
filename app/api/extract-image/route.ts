@@ -74,15 +74,7 @@ export async function POST(request: NextRequest) {
           content: [
             {
               type: "text",
-              text: `You are extracting text from a student's class photo. This image may contain:
-- A whiteboard or blackboard with the professor's writing
-- A student's handwritten notes
-- Printed slides or diagrams
-
-Please extract ALL visible text carefully, preserving the structure as best you can.
-Include: headings, bullet points, formulas, diagrams described in words, any numbered lists.
-If the image contains a diagram, describe it briefly in [brackets].
-Return only the extracted/described content — no preamble or explanation.`,
+              text: `Extract all visible text from this image. Preserve the structure (headings, lists, formulas) as best you can. If the image contains a diagram, briefly describe it in brackets. Return only the extracted content.`,
             },
             {
               type: "image_url",
@@ -94,7 +86,7 @@ Return only the extracted/described content — no preamble or explanation.`,
           ],
         },
       ],
-      max_tokens: 2000,
+      max_completion_tokens: 2000,
     });
 
     const text = response.choices[0]?.message?.content ?? "";

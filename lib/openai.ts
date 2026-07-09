@@ -23,36 +23,64 @@ export { TEMPLATES };
 
 /**
  * Executes a text generation prompt.
- * First attempts to use DeepSeek V4 Flash ("deepseek-chat").
- * If the API key is missing or the request fails, it falls back to OpenAI's "gpt-5.4-mini".
+ * First attempts to use DeepSeek (V4 Flash or V4 Pro based on preference).
+ * If the preferred DeepSeek call fails, it retries with V4 Pro (if Flash failed) or falls back to OpenAI's "gpt-5.4-mini".
  */
 export async function generateTextWithFallback(
   systemPrompt: string,
   userPrompt: string,
+  modelPreference: "flash" | "pro" = "flash",
   temperature: number = 0.3,
   jsonFormat: boolean = false
 ): Promise<string> {
-  // 1. Try DeepSeek V4 Flash
+  const activeModel = modelPreference === "pro" ? "deepseek-reasoner" : "deepseek-chat";
+
+  // 1. Try DeepSeek (V4 Flash / V4 Pro)
   if (deepseek) {
     try {
-      console.log("[AI Routing] Attempting text generation with DeepSeek V4 Flash...");
+      console.log(`[AI Routing] Attempting text generation with DeepSeek (${activeModel})...`);
+      
       const completion = await deepseek.chat.completions.create({
-        model: "deepseek-chat",
+        model: activeModel,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature,
-        ...(jsonFormat ? { response_format: { type: "json_object" } } : {}),
+        // Exclude unsupported parameters for deepseek-reasoner (R1)
+        ...(activeModel === "deepseek-chat" ? {
+          temperature,
+          ...(jsonFormat ? { response_format: { type: "json_object" } } : {}),
+        } : {}),
       });
 
       const result = completion.choices[0]?.message?.content;
       if (result) {
-        console.log("[AI Routing] DeepSeek text generation successful!");
+        console.log(`[AI Routing] DeepSeek (${activeModel}) text generation successful!`);
         return result;
       }
     } catch (err) {
-      console.warn("[AI Routing] DeepSeek call failed. Falling back to OpenAI gpt-5.4-mini:", err);
+      console.warn(`[AI Routing] DeepSeek (${activeModel}) call failed, checking retries...`, err);
+
+      // "Retry after Flash fails validation": if Flash failed, try Pro!
+      if (modelPreference === "flash") {
+        try {
+          console.log("[AI Routing] Retrying text generation with DeepSeek Pro (deepseek-reasoner)...");
+          const retryCompletion = await deepseek.chat.completions.create({
+            model: "deepseek-reasoner",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+          });
+          const retryResult = retryCompletion.choices[0]?.message?.content;
+          if (retryResult) {
+            console.log("[AI Routing] DeepSeek Pro retry successful!");
+            return retryResult;
+          }
+        } catch (retryErr) {
+          console.warn("[AI Routing] DeepSeek Pro retry failed, falling back to OpenAI:", retryErr);
+        }
+      }
     }
   } else {
     console.log("[AI Routing] DEEPSEEK_API_KEY is not defined. Routing directly to OpenAI gpt-5.4-mini.");
@@ -79,7 +107,8 @@ export async function generateTextWithFallback(
 
 export async function generateStudyMaterial(
   notes: string,
-  templateId: TemplateId
+  templateId: TemplateId,
+  isMaster: boolean = false
 ): Promise<{ title: string; content: string; course: string }> {
   const template = TEMPLATES[templateId];
   const systemPrompt =
@@ -87,7 +116,8 @@ export async function generateStudyMaterial(
     "\n\nAdditionally, analyze the lecture notes and classify the academic subject or course (e.g. Chemistry, Biology, History, Computer Science, Calculus, Economics). Return this subject tag as a short, clean, capitalized phrase (1-3 words max, e.g. \"Chemistry\" or \"Computer Science\") in a third JSON key \"course\".";
   const userPrompt = `Here are my lecture notes:\n\n${notes}`;
 
-  const raw = await generateTextWithFallback(systemPrompt, userPrompt, 0.3, true);
+  const modelPreference = isMaster ? "pro" : "flash";
+  const raw = await generateTextWithFallback(systemPrompt, userPrompt, modelPreference, 0.3, true);
   const parsed = JSON.parse(raw);
   
   return {
