@@ -65,7 +65,10 @@ export async function saveAiUsageLog(log: Omit<AiUsageLog, "createdAt">): Promis
   console.log(`[AI_USAGE_LOG] ${JSON.stringify(fullLog)}`);
 }
 
-export async function checkDailyLimit(userId: string): Promise<{ allowed: boolean; reason?: string }> {
+export async function checkDailyLimit(
+  userId: string,
+  isPremium: boolean
+): Promise<{ allowed: boolean; reason?: string }> {
   ensureScratchDir();
 
   // If the file doesn't exist yet, there are no logs, so limit check passes
@@ -88,7 +91,7 @@ export async function checkDailyLimit(userId: string): Promise<{ allowed: boolea
           const recordDateStr = record.createdAt.split("T")[0];
           if (recordDateStr === todayDateStr) {
             // Count generative content features: summary, quiz, cards, eli5
-            if (["summary", "quiz", "cards", "eli5", "analogy", "explain"].includes(record.feature)) {
+            if (["summary", "quiz", "cards", "eli5", "analogy", "explain", "study-guide", "flashcards", "exam-prep"].includes(record.feature)) {
               dailyGenerationsCount++;
             }
             dailyCostUsd += record.estimatedCostUsd;
@@ -99,20 +102,21 @@ export async function checkDailyLimit(userId: string): Promise<{ allowed: boolea
       }
     }
 
-    const DAILY_GENERATION_LIMIT = 5;
-    const DAILY_COST_LIMIT_USD = 1.00;
+    // Set tier rules
+    const generationLimit = isPremium ? 100 : 25;
+    const costLimitUsd = isPremium ? 0.75 : 0.25;
 
-    if (dailyGenerationsCount >= DAILY_GENERATION_LIMIT) {
+    if (dailyGenerationsCount >= generationLimit) {
       return {
         allowed: false,
-        reason: `You have reached your daily allowance of ${DAILY_GENERATION_LIMIT} generated study materials. Limits reset tomorrow!`,
+        reason: `Daily limit reached. You have used your daily allowance of ${generationLimit} generations. Limits reset tomorrow!`,
       };
     }
 
-    if (dailyCostUsd >= DAILY_COST_LIMIT_USD) {
+    if (dailyCostUsd >= costLimitUsd) {
       return {
         allowed: false,
-        reason: "You have exceeded your daily API usage quota for the beta. Limits reset tomorrow!",
+        reason: "Daily limit reached. You have exceeded your daily API usage quota for the beta. Limits reset tomorrow!",
       };
     }
 

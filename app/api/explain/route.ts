@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { concept: reqConcept, context, mode: reqMode = "eli5", userAnswer = "", userId: reqUserId } = body;
+    const { concept: reqConcept, context, mode: reqMode = "eli5", userAnswer = "", userId: reqUserId, isPremium = false } = body;
 
     if (reqUserId) userId = reqUserId;
     if (reqConcept) concept = reqConcept;
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 1. Enforce Daily Limit Check on Backend
-    const limitCheck = await checkDailyLimit(userId);
+    const limitCheck = await checkDailyLimit(userId, isPremium);
     if (!limitCheck.allowed) {
       return NextResponse.json(
         { error: limitCheck.reason },
