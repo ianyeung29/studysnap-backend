@@ -109,14 +109,14 @@ export async function checkDailyLimit(
     if (dailyGenerationsCount >= generationLimit) {
       return {
         allowed: false,
-        reason: `Daily limit reached. You have used your daily allowance of ${generationLimit} generations. Limits reset tomorrow!`,
+        reason: `Daily limit reached. You have used your daily allowance of ${generationLimit} study packs. Limits reset tomorrow!`,
       };
     }
 
     if (dailyCostUsd >= costLimitUsd) {
       return {
         allowed: false,
-        reason: "Daily limit reached. You have exceeded your daily API usage quota for the beta. Limits reset tomorrow!",
+        reason: "Daily limit reached. You have exceeded your daily study allowance for the beta. Limits reset tomorrow!",
       };
     }
 

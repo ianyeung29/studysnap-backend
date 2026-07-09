@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateStudyMaterial, TemplateId } from "@/lib/openai";
-import { checkDailyLimit, saveAiUsageLog } from "@/lib/db";
+import { checkDailyLimit, saveAiUsageLog, saveProductEvent } from "@/lib/db";
 import { calculateCost } from "@/lib/pricing";
 
 export async function POST(request: NextRequest) {
@@ -57,6 +57,11 @@ export async function POST(request: NextRequest) {
     // 1. Enforce Daily Limit Check on Backend
     const limitCheck = await checkDailyLimit(userId, isPremium);
     if (!limitCheck.allowed) {
+      await saveProductEvent({
+        userId,
+        eventName: "limit_blocked",
+        metadata: { isPremium, feature: templateId, reason: limitCheck.reason },
+      });
       return NextResponse.json(
         { error: limitCheck.reason },
         { status: 429 }
