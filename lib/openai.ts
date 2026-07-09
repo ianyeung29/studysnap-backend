@@ -103,17 +103,24 @@ export async function generateTextWithFallback(
     throw new Error("No response from fallback AI engine");
   }
   return result;
-}
-
-export async function generateStudyMaterial(
+}export async function generateStudyMaterial(
   notes: string,
   templateId: TemplateId,
   isMaster: boolean = false
-): Promise<{ title: string; content: string; course: string }> {
+): Promise<{ title: string; content: string; course: string; highlights: any[] }> {
   const template = TEMPLATES[templateId];
   const systemPrompt =
     template.systemPrompt +
-    "\n\nAdditionally, analyze the lecture notes and classify the academic subject or course (e.g. Chemistry, Biology, History, Computer Science, Calculus, Economics). Return this subject tag as a short, clean, capitalized phrase (1-3 words max, e.g. \"Chemistry\" or \"Computer Science\") in a third JSON key \"course\".";
+    "\n\nAdditionally, analyze the lecture notes and classify the academic subject or course (e.g. Chemistry, Biology, History, Computer Science, Calculus, Economics). Return this subject tag as a short, clean, capitalized phrase (1-3 words max, e.g. \"Chemistry\" or \"Computer Science\") in a third JSON key \"course\"." +
+    "\n\nAdditionally, identify 5-15 highly important terms, definitions, formulas, rules, dates, facts, or warnings in the content. Return an array of these key highlights in a fourth JSON key \"highlights\", where each item is an object with this exact structure:\n" +
+    "{\n" +
+    "  \"text\": \"The exact word/phrase/sentence as it appears in the content value\",\n" +
+    "  \"type\": \"term\" | \"definition\" | \"formula\" | \"exam\" | \"warning\",\n" +
+    "  \"importance\": 1 | 2 | 3,\n" +
+    "  \"reason\": \"Why this is highlighted (1 short sentence)\"\n" +
+    "}\n" +
+    "Ensure the \"text\" matches character-for-character with words in the returned \"content\" field so the UI can highlight them.";
+
   const userPrompt = `Here are my lecture notes:\n\n${notes}`;
 
   const modelPreference = isMaster ? "pro" : "flash";
@@ -124,5 +131,6 @@ export async function generateStudyMaterial(
     title: parsed.title || "Untitled",
     content: parsed.content || "",
     course: parsed.course || "General",
+    highlights: parsed.highlights || [],
   };
 }

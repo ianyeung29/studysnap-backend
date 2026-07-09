@@ -44,6 +44,10 @@ function testSummarize() {
           console.log("\n✅ BACKEND TEST PASSED!");
           console.log(`Title: ${parsed.title}`);
           console.log(`Content length: ${parsed.content.length} chars`);
+          console.log(`Highlights count: ${parsed.highlights ? parsed.highlights.length : "undefined"}`);
+          if (parsed.highlights) {
+            console.log("Highlights sample:", JSON.stringify(parsed.highlights.slice(0, 3), null, 2));
+          }
           console.log("\n--- Output Preview ---");
           console.log(parsed.content.substring(0, 300) + "...\n");
         } else {
