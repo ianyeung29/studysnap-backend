@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateStudyMaterial, TemplateId } from "@/lib/openai";
+import { checkDailyLimit, saveAiUsageLog } from "@/lib/db";
+import { calculateCost } from "@/lib/pricing";
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  let userId = "anonymous_beta_tester";
+  let templateId: TemplateId = "study-guide";
+  let isMaster = false;
+
   try {
     const body = await request.json();
-    const { notes, templateId, isMaster = false } = body as { notes: string; templateId: TemplateId; isMaster?: boolean };
+    const { notes, templateId: reqTemplateId, isMaster: reqIsMaster = false, userId: reqUserId } = body;
+    
+    if (reqUserId) userId = reqUserId;
+    if (reqTemplateId) templateId = reqTemplateId as TemplateId;
+    isMaster = reqIsMaster;
 
     if (!notes || typeof notes !== "string") {
       return NextResponse.json(
@@ -43,16 +54,64 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await generateStudyMaterial(notes, templateId, isMaster);
+    // 1. Enforce Daily Limit Check on Backend
+    const limitCheck = await checkDailyLimit(userId);
+    if (!limitCheck.allowed) {
+      return NextResponse.json(
+        { error: limitCheck.reason },
+        { status: 429 }
+      );
+    }
 
+    // 2. Call the AI Model
+    const { result, usage } = await generateStudyMaterial(notes, templateId, isMaster);
+    const latencyMs = Date.now() - startTime;
+
+    // 3. Centralized Pricing Calculator
+    const estimatedCostUsd = calculateCost(
+      usage.model,
+      usage.promptTokens,
+      usage.completionTokens,
+      usage.cachedPromptTokens || 0
+    );
+
+    // 4. Save Usage Log Telemetry
+    await saveAiUsageLog({
+      userId,
+      sessionId: result.title, // Maps session identifier to title context
+      feature: templateId,
+      provider: usage.provider,
+      model: usage.model,
+      inputTokens: usage.promptTokens,
+      cachedInputTokens: usage.cachedPromptTokens,
+      outputTokens: usage.completionTokens,
+      estimatedCostUsd,
+      latencyMs,
+      success: true,
+    });
+
+    // 5. Return study pack to client
     return NextResponse.json({ success: true, ...result });
   } catch (error: unknown) {
+    const latencyMs = Date.now() - startTime;
     console.error("Summarize API error:", error);
 
-    const message =
-      error instanceof Error ? error.message : "An unexpected error occurred";
+    const message = error instanceof Error ? error.message : "An unexpected error occurred";
 
-    // OpenAI quota / rate limit
+    // Save Failed Usage Log
+    await saveAiUsageLog({
+      userId,
+      feature: templateId,
+      provider: isMaster ? "DeepSeek" : "OpenAI",
+      model: isMaster ? "deepseek-reasoner" : "gpt-4o-mini",
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: 0,
+      latencyMs,
+      success: false,
+      errorCode: message.slice(0, 100),
+    });
+
     if (message.includes("429") || message.includes("quota")) {
       return NextResponse.json(
         { error: "AI service is busy. Please try again in a moment." },
@@ -61,7 +120,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: "Failed to generate study materials. Please try again." },
+      { error: message || "Failed to generate study materials. Please try again." },
       { status: 500 }
     );
   }

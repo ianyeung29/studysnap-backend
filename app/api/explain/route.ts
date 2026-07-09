@@ -1,17 +1,38 @@
 // app/api/explain/route.ts — SERVER ONLY
 import { NextRequest, NextResponse } from "next/server";
 import { generateTextWithFallback } from "@/lib/openai";
+import { checkDailyLimit, saveAiUsageLog } from "@/lib/db";
+import { calculateCost } from "@/lib/pricing";
 
 export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  let userId = "anonymous_beta_tester";
+  let mode = "eli5";
+  let concept = "";
+
   try {
-    const { concept, context, mode = "eli5", userAnswer = "" } = await request.json();
+    const body = await request.json();
+    const { concept: reqConcept, context, mode: reqMode = "eli5", userAnswer = "", userId: reqUserId } = body;
+
+    if (reqUserId) userId = reqUserId;
+    if (reqConcept) concept = reqConcept;
+    mode = reqMode;
 
     if (!concept || typeof concept !== "string") {
       return NextResponse.json(
         { error: "Please specify the concept you want explained." },
         { status: 400 }
+      );
+    }
+
+    // 1. Enforce Daily Limit Check on Backend
+    const limitCheck = await checkDailyLimit(userId);
+    if (!limitCheck.allowed) {
+      return NextResponse.json(
+        { error: limitCheck.reason },
+        { status: 429 }
       );
     }
 
@@ -48,37 +69,76 @@ export async function POST(request: NextRequest) {
 
     const prompt = `You are a world-class tutor. Your goal is to explain the concept: "${concept}" to a student.
     
-Instruction for explanation style:
-${modeInstruction}
+    Instruction for explanation style:
+    ${modeInstruction}
+    
+    Use this lecture context to ensure your explanation aligns with how the professor is teaching it:
+    ---
+    ${context || "No context provided"}
+    ---
+    
+    Return your explanation in a JSON object with this exact format:
+    {
+      "explanation": "A response (1-2 paragraphs) in Markdown format. Use bold text for key terms. Keep the tone friendly, supportive, and engaging."
+    }`;
 
-Use this lecture context to ensure your explanation aligns with how the professor is teaching it:
----
-${context || "No context provided"}
----
-
-Return your explanation in a JSON object with this exact format:
-{
-  "explanation": "A response (1-2 paragraphs) in Markdown format. Use bold text for key terms. Keep the tone friendly, supportive, and engaging."
-}`;
-
-    const raw = await generateTextWithFallback(
+    // 2. Call text generation fallback
+    const { text, model, provider, promptTokens, completionTokens, cachedPromptTokens } = await generateTextWithFallback(
       "You are an expert tutor that explains complex ideas simply and creatively in JSON format.",
       prompt,
       "flash",
       0.6,
       true
     );
-    if (!raw) throw new Error("No response from AI");
 
-    const parsed = JSON.parse(raw);
+    const latencyMs = Date.now() - startTime;
+    const parsed = JSON.parse(text);
+
+    // 3. Centralized Pricing Calculator
+    const estimatedCostUsd = calculateCost(
+      model,
+      promptTokens,
+      completionTokens,
+      cachedPromptTokens || 0
+    );
+
+    // 4. Save Usage Log Telemetry
+    await saveAiUsageLog({
+      userId,
+      sessionId: concept, // Use concept name as sessionId context
+      feature: mode === "check-quiz" ? "quiz" : "eli5",
+      provider,
+      model,
+      inputTokens: promptTokens,
+      cachedInputTokens: cachedPromptTokens,
+      outputTokens: completionTokens,
+      estimatedCostUsd,
+      latencyMs,
+      success: true,
+    });
+
     return NextResponse.json({
       success: true,
       explanation: parsed.explanation || "No explanation could be generated.",
     });
   } catch (error: unknown) {
+    const latencyMs = Date.now() - startTime;
     console.error("Explain API error:", error);
-    const message =
-      error instanceof Error ? error.message : "Unexpected error during explanation";
+    const message = error instanceof Error ? error.message : "Unexpected error during explanation";
+
+    // Save Failed Usage Log
+    await saveAiUsageLog({
+      userId,
+      feature: mode === "check-quiz" ? "quiz" : "eli5",
+      provider: "OpenAI",
+      model: "gpt-4o-mini",
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: 0,
+      latencyMs,
+      success: false,
+      errorCode: message.slice(0, 100),
+    });
 
     return NextResponse.json(
       { error: message },
