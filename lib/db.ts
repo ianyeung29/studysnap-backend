@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { neon } from "@neondatabase/serverless";
+import { evaluateAbuseSignals } from "./abuse";
 
 const SCRATCH_DIR = path.join(process.cwd(), "scratch");
 const EVENTS_FILE = path.join(SCRATCH_DIR, "product_events.jsonl");
@@ -71,6 +72,10 @@ export async function saveProductEvent(event: Omit<ProductEvent, "createdAt">): 
         INSERT INTO product_events (user_id, event_name, metadata_json, platform, app_version)
         VALUES (${fullEvent.userId}, ${fullEvent.eventName}, ${JSON.stringify(fullEvent.metadata || {})}, ${fullEvent.platform || null}, ${fullEvent.appVersion || null})
       `;
+      // Trigger background abuse scanner asynchronously
+      evaluateAbuseSignals(fullEvent.userId).catch((err) => {
+        console.error("Abuse scanner background execution failed:", err);
+      });
       return;
     } catch (dbErr) {
       console.error("Neon PostgreSQL write failed for product event, falling back to JSONL:", dbErr);
@@ -78,6 +83,11 @@ export async function saveProductEvent(event: Omit<ProductEvent, "createdAt">): 
   }
 
   writeToJsonlFile(EVENTS_FILE, fullEvent);
+
+  // Trigger background abuse scanner asynchronously
+  evaluateAbuseSignals(fullEvent.userId).catch((err) => {
+    console.error("Abuse scanner background execution failed:", err);
+  });
 }
 
 export async function saveAiUsageLog(log: Omit<AiUsageLog, "createdAt">): Promise<void> {
@@ -100,6 +110,10 @@ export async function saveAiUsageLog(log: Omit<AiUsageLog, "createdAt">): Promis
           ${fullLog.estimatedCostUsd}, ${fullLog.latencyMs}, ${fullLog.success}, ${fullLog.errorCode || null}
         )
       `;
+      // Trigger background abuse scanner asynchronously
+      evaluateAbuseSignals(fullLog.userId).catch((err) => {
+        console.error("Abuse scanner background execution failed:", err);
+      });
       return;
     } catch (dbErr) {
       console.error("Neon PostgreSQL write failed for AI usage log, falling back to JSONL:", dbErr);
@@ -107,6 +121,11 @@ export async function saveAiUsageLog(log: Omit<AiUsageLog, "createdAt">): Promis
   }
 
   writeToJsonlFile(LOGS_FILE, fullLog);
+
+  // Trigger background abuse scanner asynchronously
+  evaluateAbuseSignals(fullLog.userId).catch((err) => {
+    console.error("Abuse scanner background execution failed:", err);
+  });
 }
 
 // ── Concurrency Lock Manager ──
