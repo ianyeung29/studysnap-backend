@@ -1,4 +1,5 @@
 import styles from "./Footer.module.css";
+import Image from "next/image";
 
 export default function Footer() {
   return (
@@ -6,7 +7,14 @@ export default function Footer() {
       <div className={`container ${styles.inner}`}>
         <div className={styles.brand}>
           <span className={styles.logo}>
-            ⚡ Study<span className="gradient-text">Snap</span>
+            <Image
+              src="/logo.png"
+              alt="StudySnap Logo"
+              width={20}
+              height={20}
+              style={{ borderRadius: 4, marginRight: 8, display: "inline-block", verticalAlign: "middle" }}
+            />
+            Study<span className="gradient-text">Snap</span>
           </span>
           <p className={styles.tagline}>
             Turn messy lecture notes into perfect study materials. Free, fast, private.

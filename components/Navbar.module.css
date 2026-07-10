@@ -22,8 +22,8 @@
   text-decoration: none;
 }
 
-.logoIcon {
-  font-size: 1.3rem;
+.logoImg {
+  border-radius: 6px;
   animation: float 3s ease-in-out infinite;
 }
 
