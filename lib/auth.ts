@@ -13,8 +13,11 @@ export interface VerifiedUser {
  * Checks signature, exp (expiration), aud (audience = "authenticated"), and sub (subject).
  */
 export async function verifyUserToken(authHeader: string | null): Promise<VerifiedUser | null> {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
+  if (!authHeader) {
+    throw new Error("Missing Authorization header in request.");
+  }
+  if (!authHeader.startsWith("Bearer ")) {
+    throw new Error("Invalid Authorization header format. Must start with Bearer.");
   }
 
   const token = authHeader.substring(7);
@@ -38,14 +41,10 @@ export async function verifyUserToken(authHeader: string | null): Promise<Verifi
           };
         }
       }
-    } catch (decodeErr) {
-      console.error("Failed to decode token without verification:", decodeErr);
+    } catch (decodeErr: any) {
+      throw new Error(`Failed to decode JWT token: ${decodeErr.message}`);
     }
-    return {
-      userId: "local_dev_tester",
-      email: "dev@studysnap.app",
-      provider: "mock",
-    };
+    throw new Error("Invalid JWT token format during unverified decoding.");
   }
 
   try {
@@ -61,8 +60,7 @@ export async function verifyUserToken(authHeader: string | null): Promise<Verifi
 
     const userId = payload.sub;
     if (!userId) {
-      console.error("JWT payload is missing sub (user ID) claim");
-      return null;
+      throw new Error("JWT payload is missing sub (user ID) claim");
     }
 
     const email = payload.email as string | undefined;
@@ -76,6 +74,6 @@ export async function verifyUserToken(authHeader: string | null): Promise<Verifi
     };
   } catch (err: any) {
     console.error("JWT verification failed:", err.message || err);
-    return null;
+    throw new Error(`JWT verification failed: ${err.message || String(err)}`);
   }
 }
