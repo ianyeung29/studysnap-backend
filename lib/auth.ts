@@ -1,4 +1,4 @@
-import { jwtVerify } from "jose";
+import { jwtVerify, createRemoteJWKSet } from "jose";
 
 const jwtSecret = process.env.SUPABASE_JWT_SECRET;
 
@@ -9,7 +9,7 @@ export interface VerifiedUser {
 }
 
 /**
- * Verifies a Supabase HS256 JWT bearer token from the Authorization header.
+ * Verifies a Supabase HS256/ES256 JWT bearer token from the Authorization header.
  * Checks signature, exp (expiration), aud (audience = "authenticated"), and sub (subject).
  */
 export async function verifyUserToken(authHeader: string | null): Promise<VerifiedUser | null> {
@@ -22,41 +22,39 @@ export async function verifyUserToken(authHeader: string | null): Promise<Verifi
 
   const token = authHeader.substring(7);
 
-  // If secret is missing, warn but fail open by decoding token without verification so beta works
-  if (!jwtSecret) {
-    console.warn("⚠️ SUPABASE_JWT_SECRET is not set. Bypassing JWT signature check. Please set this in production as soon as possible!");
-    try {
-      const parts = token.split(".");
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
-        const userId = payload.sub;
-        if (userId) {
-          const email = payload.email as string | undefined;
-          const appMetadata = (payload.app_metadata || {}) as Record<string, any>;
-          const provider = appMetadata.provider as string | undefined;
-          return {
-            userId,
-            email,
-            provider,
-          };
-        }
-      }
-    } catch (decodeErr: any) {
-      throw new Error(`Failed to decode JWT token: ${decodeErr.message}`);
-    }
-    throw new Error("Invalid JWT token format during unverified decoding.");
-  }
-
   try {
-    const secretBuffer = new TextEncoder().encode(jwtSecret);
-    
-    // jose's jwtVerify checks:
-    // - signature validity using HS256
-    // - exp (token expiry)
-    // - aud (audience claim)
-    const { payload } = await jwtVerify(token, secretBuffer, {
-      audience: "authenticated",
-    });
+    const parts = token.split(".");
+    if (parts.length !== 3) {
+      throw new Error("Invalid JWT token format.");
+    }
+    const header = JSON.parse(Buffer.from(parts[0], "base64").toString("utf8"));
+    const alg = header.alg;
+
+    let payload: any;
+
+    if (alg === "ES256" || alg === "RS256") {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "https://xxwqpanfytavfvabhtbz.supabase.co";
+      const jwksUrl = `${supabaseUrl}/auth/v1/.well-known/jwks.json`;
+      const JWKS = createRemoteJWKSet(new URL(jwksUrl));
+      
+      const verified = await jwtVerify(token, JWKS, {
+        audience: "authenticated",
+      });
+      payload = verified.payload;
+    } else {
+      // For HS256 tokens, verify using symmetric jwtSecret
+      if (!jwtSecret) {
+        console.warn("⚠️ SUPABASE_JWT_SECRET is not set. Bypassing JWT signature check for HS256 token.");
+        const payloadDecoded = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+        payload = payloadDecoded;
+      } else {
+        const secretBuffer = new TextEncoder().encode(jwtSecret);
+        const verified = await jwtVerify(token, secretBuffer, {
+          audience: "authenticated",
+        });
+        payload = verified.payload;
+      }
+    }
 
     const userId = payload.sub;
     if (!userId) {
