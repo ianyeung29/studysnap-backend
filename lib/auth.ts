@@ -73,7 +73,18 @@ export async function verifyUserToken(authHeader: string | null): Promise<Verifi
       provider,
     };
   } catch (err: any) {
-    console.error("JWT verification failed:", err.message || err);
-    throw new Error(`JWT verification failed: ${err.message || String(err)}`);
+    let tokenMeta = "unknown";
+    try {
+      const parts = token.split(".");
+      if (parts.length === 3) {
+        const header = JSON.parse(Buffer.from(parts[0], "base64").toString("utf8"));
+        const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+        tokenMeta = `alg:${header.alg}, iss:${payload.iss}, aud:${payload.aud}, sub:${payload.sub}`;
+      }
+    } catch (e) {
+      tokenMeta = "undecodable";
+    }
+    console.error("JWT verification failed:", err.message || err, `TokenMeta: ${tokenMeta}`);
+    throw new Error(`JWT verification failed: ${err.message || String(err)} | TokenMeta: ${tokenMeta}`);
   }
 }
