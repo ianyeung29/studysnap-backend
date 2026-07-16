@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     await upsertUser(userId, userEmail, authProvider);
 
     const body = await request.json();
-    const { userId: reqInstallId, notes, templateId: reqTemplateId, isMaster: reqIsMaster = false, isPremium = false } = body;
+    const { userId: reqInstallId, notes, documentNotes, templateId: reqTemplateId, isMaster: reqIsMaster = false, isPremium = false } = body;
     
     if (reqInstallId) installId = reqInstallId;
     if (reqTemplateId) templateId = reqTemplateId as TemplateId;
@@ -41,16 +41,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (notes.trim().length < 50) {
+    if (notes.trim().length < 20) { // Lowered min limit slightly for PDF-only cases
       return NextResponse.json(
-        { error: "Notes are too short. Please paste at least a few sentences." },
+        { error: "Notes are too short. Please capture a recording or upload slides." },
         { status: 400 }
       );
     }
 
-    if (notes.length > 30000) {
+    if (notes.length > 60000) {
       return NextResponse.json(
-        { error: "Notes are too long. Please limit to 30,000 characters." },
+        { error: "Notes and documents are too long. Please limit to 60,000 characters total." },
         { status: 400 }
       );
     }
@@ -94,8 +94,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Combine base notes with slide/document notes if present
+    let finalNotes = notes;
+    if (documentNotes && Array.isArray(documentNotes) && documentNotes.length > 0) {
+      finalNotes += "\n\n--- [ATTACHED PDF SLIDES TEXT] ---\n" + documentNotes.map((pageText, idx) => `[Slide/Page ${idx + 1}]:\n${pageText}`).join("\n\n");
+    }
+
     // 2. Call the AI Model
-    const { result, usage } = await generateStudyMaterial(notes, templateId, isMaster);
+    const { result, usage } = await generateStudyMaterial(finalNotes, templateId, isMaster);
     const latencyMs = Date.now() - startTime;
 
     // 3. Centralized Pricing Calculator

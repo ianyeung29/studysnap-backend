@@ -19,9 +19,12 @@ export default function Navbar() {
           </span>
         </Link>
 
-        <div className={styles.actions}>
-          <a href="#download" className={`btn btn-ghost ${styles.ctaBtn}`}>
-            Download
+        <div className={styles.actions} style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+          <Link href="/dashboard" className={`btn btn-ghost ${styles.ctaBtn}`}>
+            Web Portal
+          </Link>
+          <a href="#download" className={`btn btn-purple ${styles.ctaBtn}`}>
+            Download App
           </a>
         </div>
       </div>

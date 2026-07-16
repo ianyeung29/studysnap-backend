@@ -42,3 +42,21 @@ CREATE TABLE IF NOT EXISTS ai_usage_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_user_id ON ai_usage_logs(user_id);
+
+-- 3. Sessions Table (for Web Portal & Mobile Syncing)
+CREATE TABLE IF NOT EXISTS sessions (
+  id VARCHAR(255) PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(255) NOT NULL,
+  course VARCHAR(255),
+  parent_folder VARCHAR(255),
+  template_id VARCHAR(50),
+  audio_uri TEXT,
+  audio_duration INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  artifact_json JSONB,
+  document_notes JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
