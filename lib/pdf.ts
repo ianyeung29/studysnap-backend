@@ -1,3 +1,10 @@
+// Shim browser globals for pdfjs-dist / pdf-parse module evaluation during SSR/static Next.js build
+if (typeof global !== "undefined") {
+  if (!(global as any).DOMMatrix) {
+    (global as any).DOMMatrix = class DOMMatrix {};
+  }
+}
+
 // Using require to avoid ESM/CommonJS default export mismatch issues in Next.js
 const pdfParse = require("pdf-parse");
 
