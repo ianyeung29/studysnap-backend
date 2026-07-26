@@ -15,10 +15,20 @@ export const PRICING_MAP: Record<string, ModelPricing> = {
     outputPerMillion: 10.00,
   },
   // DeepSeek Models (V4 Flash and Pro)
+  "deepseek-chat": {
+    inputPerMillion: 0.14,
+    outputPerMillion: 0.28,
+    cachedInputPerMillion: 0.0028,
+  },
   "deepseek-v4-flash": {
     inputPerMillion: 0.14,
     outputPerMillion: 0.28,
     cachedInputPerMillion: 0.0028,
+  },
+  "deepseek-reasoner": {
+    inputPerMillion: 0.435,
+    outputPerMillion: 0.87,
+    cachedInputPerMillion: 0.003625,
   },
   "deepseek-v4-pro": {
     inputPerMillion: 0.435,
