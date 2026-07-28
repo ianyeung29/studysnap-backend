@@ -344,3 +344,113 @@ function checkLimitFromJsonl(
     return { allowed: true }; // Allow fallback if disk read crashes
   }
 }
+
+// ── Cloudflare R2 User Files Metadata Operations ──
+export interface UserFileRecord {
+  id?: string;
+  userId: string;
+  sessionId?: string;
+  fileName: string;
+  fileType: "upload_pdf" | "upload_image" | "output_pdf" | "upload_audio";
+  r2Key: string;
+  fileSize?: number;
+  mimeType?: string;
+  createdAt?: string;
+}
+
+const FILES_JSONL = path.join(SCRATCH_DIR, "user_files.jsonl");
+
+// Auto-initialize Neon PostgreSQL table for user_files
+if (sql) {
+  sql`
+    CREATE TABLE IF NOT EXISTS user_files (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id VARCHAR(255) NOT NULL,
+      session_id VARCHAR(255),
+      file_name VARCHAR(255) NOT NULL,
+      file_type VARCHAR(50) NOT NULL,
+      r2_key VARCHAR(500) NOT NULL,
+      file_size BIGINT DEFAULT 0,
+      mime_type VARCHAR(100),
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `.catch((err) => console.error("Neon PostgreSQL user_files table creation check failed:", err));
+}
+
+export async function saveUserFileRecord(record: Omit<UserFileRecord, "id" | "createdAt">): Promise<UserFileRecord> {
+  const fullRecord: UserFileRecord = {
+    ...record,
+    createdAt: new Date().toISOString(),
+  };
+
+  if (sql) {
+    try {
+      const result = await sql`
+        INSERT INTO user_files (user_id, session_id, file_name, file_type, r2_key, file_size, mime_type)
+        VALUES (${fullRecord.userId}, ${fullRecord.sessionId || null}, ${fullRecord.fileName}, ${fullRecord.fileType}, ${fullRecord.r2Key}, ${fullRecord.fileSize || 0}, ${fullRecord.mimeType || null})
+        RETURNING id, created_at
+      `;
+      if (result && result.length > 0) {
+        fullRecord.id = result[0].id;
+        fullRecord.createdAt = result[0].created_at;
+      }
+      return fullRecord;
+    } catch (err) {
+      console.error("Neon PostgreSQL saveUserFileRecord failed, falling back to JSONL:", err);
+    }
+  }
+
+  writeToJsonlFile(FILES_JSONL, fullRecord);
+  return fullRecord;
+}
+
+export async function getUserFileRecords(userId: string): Promise<UserFileRecord[]> {
+  if (sql) {
+    try {
+      const rows = await sql`
+        SELECT id, user_id as "userId", session_id as "sessionId", file_name as "fileName", file_type as "fileType", r2_key as "r2Key", file_size as "fileSize", mime_type as "mimeType", created_at as "createdAt"
+        FROM user_files
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC
+      `;
+      return rows as UserFileRecord[];
+    } catch (err) {
+      console.error("Neon PostgreSQL getUserFileRecords failed, checking JSONL fallback:", err);
+    }
+  }
+
+  if (!fs.existsSync(FILES_JSONL)) return [];
+  try {
+    const data = fs.readFileSync(FILES_JSONL, "utf8");
+    const lines = data.split("\n").filter(Boolean);
+    const records: UserFileRecord[] = [];
+    for (const line of lines) {
+      try {
+        const r: UserFileRecord = JSON.parse(line);
+        if (r.userId === userId) {
+          records.push(r);
+        }
+      } catch (e) {}
+    }
+    return records.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  } catch (err) {
+    console.error("Local JSONL files read failed:", err);
+    return [];
+  }
+}
+
+export async function deleteUserFileRecord(userId: string, r2Key: string): Promise<boolean> {
+  if (sql) {
+    try {
+      await sql`
+        DELETE FROM user_files
+        WHERE user_id = ${userId} AND r2_key = ${r2Key}
+      `;
+      return true;
+    } catch (err) {
+      console.error("Neon PostgreSQL deleteUserFileRecord failed:", err);
+    }
+  }
+  return true;
+}
+
