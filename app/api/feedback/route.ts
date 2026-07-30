@@ -3,7 +3,7 @@ import { verifyUserToken } from "@/lib/auth";
 
 export const maxDuration = 30;
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "asmrforall1999@gmail.com";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "ianyeung30@gmail.com";
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
 export async function POST(request: NextRequest) {
