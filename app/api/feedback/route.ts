@@ -9,7 +9,14 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY;
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get("Authorization");
-    const verifiedUser = await verifyUserToken(authHeader);
+    let verifiedUser = null;
+    if (authHeader) {
+      try {
+        verifiedUser = await verifyUserToken(authHeader);
+      } catch (e) {
+        console.log("[Feedback Route] Unverified token provided, proceeding as guest feedback.");
+      }
+    }
     
     const body = await request.json();
     const { feedbackType = "Suggestion", feedbackText, userEmail: bodyEmail, installId } = body;
