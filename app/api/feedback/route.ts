@@ -54,7 +54,8 @@ ${feedbackText.trim()}
     console.log(`[Feedback] Processing ${feedbackType} from ${senderEmail}`);
 
     if (RESEND_API_KEY) {
-      const resendRes = await fetch("https://api.resend.com/emails", {
+      let targetRecipient = ADMIN_EMAIL;
+      let resendRes = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${RESEND_API_KEY}`,
@@ -62,14 +63,34 @@ ${feedbackText.trim()}
         },
         body: JSON.stringify({
           from: "StudySnap Feedback <onboarding@resend.dev>",
-          to: [ADMIN_EMAIL],
+          to: [targetRecipient],
           reply_to: senderEmail.includes("@") ? senderEmail : undefined,
           subject,
           html: htmlBody,
         }),
       });
 
-      const resendData = await resendRes.json();
+      let resendData = await resendRes.json();
+
+      // If failed due to testing domain recipient restriction, retry with account owner email
+      if (!resendRes.ok && targetRecipient !== "ianyeung30@gmail.com") {
+        console.warn("[Resend Warning] Target email rejected by testing domain. Retrying with ianyeung30@gmail.com...");
+        resendRes = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${RESEND_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: "StudySnap Feedback <onboarding@resend.dev>",
+            to: ["ianyeung30@gmail.com"],
+            reply_to: senderEmail.includes("@") ? senderEmail : undefined,
+            subject,
+            html: htmlBody,
+          }),
+        });
+        resendData = await resendRes.json();
+      }
 
       if (!resendRes.ok) {
         console.error("[Resend Error]", resendData);
