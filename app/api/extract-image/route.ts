@@ -1,6 +1,6 @@
 // app/api/extract-image/route.ts — SERVER ONLY
 import { NextRequest, NextResponse } from "next/server";
-import { openai } from "@/lib/openai";
+import { openai, deepseek } from "@/lib/openai";
 import { checkDailyLimit, saveAiUsageLog, saveProductEvent, acquireLock, releaseLock, upsertUser } from "@/lib/db";
 import { calculateCost } from "@/lib/pricing";
 import { verifyUserToken } from "@/lib/auth";
@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
   let photoCount = 1;
   let lockAcquired = false;
   let activeModel = "gpt-4o-mini";
+  let activeProvider = "OpenAI";
 
   try {
     // 1. Authenticate Request
@@ -134,34 +135,86 @@ export async function POST(request: NextRequest) {
       console.warn("[OCR Routing] Classification failed, defaulting to gpt-4o-mini:", routeErr);
     }
 
-    // 5. Perform high-fidelity extraction using the routed model
-    const response = await openai.chat.completions.create({
-      model: activeModel,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Extract all visible text from this image. Preserve the structure (headings, lists, formulas) as best you can. If the image contains a diagram, briefly describe it in brackets. Return only the extracted content.`,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${base64}`,
-                detail: "high",
+    // 5. Perform high-fidelity extraction (Primary: OpenAI -> Fallback: DeepSeek Vision)
+    let text = "";
+    let ocrTokensIn = 0;
+    let ocrTokensOut = 0;
+
+    const extractionPrompt = `Extract all visible text from this image. Preserve the structure (headings, lists, formulas) as best you can. If the image contains a diagram, briefly describe it in brackets. Return only the extracted content.`;
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: activeModel,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: extractionPrompt,
               },
-            },
-          ],
-        },
-      ],
-      max_completion_tokens: 2000,
-    });
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mimeType};base64,${base64}`,
+                  detail: "high",
+                },
+              },
+            ],
+          },
+        ],
+        max_completion_tokens: 2000,
+      });
 
-    const ocrTokensIn = response.usage?.prompt_tokens || 0;
-    const ocrTokensOut = response.usage?.completion_tokens || 0;
+      ocrTokensIn = response.usage?.prompt_tokens || 0;
+      ocrTokensOut = response.usage?.completion_tokens || 0;
+      text = response.choices[0]?.message?.content ?? "";
+      activeProvider = "OpenAI";
+    } catch (openAiErr) {
+      console.warn("[OCR Primary Failed] OpenAI Vision error, attempting DeepSeek Vision backup:", openAiErr);
 
-    const text = response.choices[0]?.message?.content ?? "";
+      if (deepseek) {
+        try {
+          const deepseekVisionModel = "deepseek-v4-flash-vision-exp";
+          console.log(`[OCR Backup] Invoking DeepSeek Vision (${deepseekVisionModel})...`);
+
+          const deepseekResponse = await deepseek.chat.completions.create({
+            model: deepseekVisionModel,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: extractionPrompt,
+                  },
+                  {
+                    type: "image_url",
+                    image_url: {
+                      url: `data:${mimeType};base64,${base64}`,
+                    },
+                  },
+                ],
+              },
+            ],
+            max_tokens: 2000,
+          });
+
+          ocrTokensIn = deepseekResponse.usage?.prompt_tokens || 0;
+          ocrTokensOut = deepseekResponse.usage?.completion_tokens || 0;
+          text = deepseekResponse.choices[0]?.message?.content ?? "";
+          activeModel = deepseekVisionModel;
+          activeProvider = "DeepSeek";
+          console.log("[OCR Backup Succeeded] DeepSeek Vision extraction completed successfully.");
+        } catch (deepseekErr) {
+          console.error("[OCR Backup Failed] DeepSeek Vision also failed:", deepseekErr);
+          throw openAiErr; // Throw original error for consistent handling
+        }
+      } else {
+        throw openAiErr;
+      }
+    }
+
     const latencyMs = Date.now() - startTime;
 
     // Calculate dynamic cost
@@ -174,7 +227,7 @@ export async function POST(request: NextRequest) {
       userId,
       sessionId: installId,
       feature: "ocr",
-      provider: "OpenAI",
+      provider: activeProvider,
       model: activeModel,
       inputTokens: classificationTokensIn + ocrTokensIn,
       outputTokens: classificationTokensOut + ocrTokensOut,

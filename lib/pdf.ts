@@ -9,26 +9,27 @@ if (typeof global !== "undefined") {
 const pdfParse = require("pdf-parse");
 
 export async function parsePdfPages(buffer: Buffer): Promise<string[]> {
-  const pages: string[] = [];
-
-  const renderPage = (pageData: any) => {
-    return pageData.getTextContent().then((textContent: any) => {
-      const text = textContent.items.map((item: any) => item.str).join(" ");
-      // pageData.pageIndex is 0-indexed (e.g. 0 for Page 1, 1 for Page 2)
-      pages[pageData.pageIndex] = text;
-      return text;
-    });
-  };
-
   try {
-    await pdfParse(buffer, {
-      pagerender: renderPage
-    });
-  } catch (err) {
-    console.error("[PDF Parse Error]:", err);
-    throw new Error("Failed to parse PDF document.");
-  }
+    const data = await pdfParse(buffer);
+    const fullText = (data.text || "").trim();
 
-  // Filter out any empty/undefined pages and return
-  return pages.map(p => p || "");
+    if (!fullText) {
+      throw new Error("This PDF contains no readable text. If it is a scanned document or photo, please import it as a photo/screenshot.");
+    }
+
+    // Split text by form-feed page markers (\f) or fallback to paragraphs
+    const pageSplits = fullText.split(/\f/);
+    const validPages = pageSplits
+      .map((p: string) => p.trim())
+      .filter((p: string) => p.length > 0);
+
+    if (validPages.length > 0) {
+      return validPages;
+    }
+
+    return [fullText];
+  } catch (err: any) {
+    console.error("[PDF Parse Error]:", err);
+    throw new Error(err.message || "Failed to parse PDF document. Please ensure the PDF is not password-protected.");
+  }
 }
