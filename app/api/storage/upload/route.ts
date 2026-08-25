@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyUserToken } from "@/lib/auth";
 import { uploadBufferToR2, isR2Configured } from "@/lib/r2";
-import { saveUserFileRecord } from "@/lib/db";
+import { saveUserFileRecord, getUserFileRecords } from "@/lib/db";
 
 export async function POST(request: NextRequest) {
   try {
