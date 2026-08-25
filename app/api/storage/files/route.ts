@@ -14,9 +14,18 @@ export async function GET(request: NextRequest) {
 
     const records = await getUserFileRecords(verifiedUser.userId);
 
+    // Deduplicate records by unique fileName and fileSize
+    const seen = new Set<string>();
+    const uniqueRecords = records.filter((rec) => {
+      const key = `${rec.fileName}_${rec.fileSize || 0}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
     // Enrich records with fresh presigned download URLs
     const enrichedFiles = await Promise.all(
-      records.map(async (rec) => {
+      uniqueRecords.map(async (rec) => {
         let downloadUrl = "";
         if (isR2Configured && rec.r2Key) {
           try {

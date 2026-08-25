@@ -32,6 +32,26 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
+    // 1. Deduplication check: If user already uploaded this exact file, reuse it
+    const existingFiles = await getUserFileRecords(verifiedUser.userId);
+    const existing = existingFiles.find(
+      (f) => f.fileName === customFileName && Number(f.fileSize) === buffer.length && f.fileType === fileType
+    );
+
+    if (existing) {
+      console.log(`[R2 Deduplication] Reusing existing file: ${customFileName} (${existing.r2Key})`);
+      return NextResponse.json({
+        success: true,
+        downloadUrl: `https://pub-${process.env.CLOUDFLARE_R2_ACCOUNT_ID}.r2.dev/${existing.r2Key}`,
+        r2Key: existing.r2Key,
+        fileId: existing.id,
+        fileName: existing.fileName,
+        fileType: existing.fileType,
+        fileSize: existing.fileSize,
+        isDuplicate: true,
+      });
+    }
+
     const sanitizedFileName = customFileName.replace(/[^a-zA-Z0-9_.-]/g, "_");
     const timestamp = Date.now();
     const r2Key = `users/${verifiedUser.userId}/${fileType}/${timestamp}_${sanitizedFileName}`;
