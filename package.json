@@ -19,12 +19,15 @@
     "next": "16.2.10",
     "openai": "^6.45.0",
     "pdf-parse": "^2.4.5",
+    "pngjs": "^7.0.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "unpdf": "^1.8.1"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/pdf-parse": "^1.1.5",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
