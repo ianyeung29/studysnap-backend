@@ -41,13 +41,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (pdfFile.type !== "application/pdf" && !pdfFile.name.endsWith(".pdf")) {
-      return NextResponse.json(
-        { error: "Unsupported document format. Please upload a PDF file." },
-        { status: 400 }
-      );
-    }
-
     // 2. Check limits (use "ocr" daily limits classification)
     const limitCheck = await checkDailyLimit(userId, isPremium);
     if (!limitCheck.allowed) {
@@ -73,7 +66,8 @@ export async function POST(request: NextRequest) {
 
     // 4. Extract PDF pages
     const bytes = await pdfFile.arrayBuffer();
-    const pages = await parsePdfPages(Buffer.from(bytes));
+    const buffer = Buffer.from(bytes);
+    const pages = await parsePdfPages(buffer);
     const latencyMs = Date.now() - startTime;
 
     // Save AI usage log (consider free weight for raw text parsing)
@@ -112,7 +106,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(
-      { error: "Failed to extract text from PDF. Please try again." },
+      { error: message || "Failed to extract text from PDF. Please try again." },
       { status: 500 }
     );
   } finally {
